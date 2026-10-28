@@ -14,6 +14,7 @@ import type { ProjectContext, ProjectInitResult } from "./context"
 import type { ProjectContexts } from "./contexts"
 import { canonicalizePath, projectIdFor, resolveProjectRoot, samePath } from "./paths"
 import type { SidebarTarget, SessionRef } from "./route"
+import type { CloudService } from "../cloud/service"
 import { cloneProject, createProject, defaultParent, onboard, type Onboarding } from "./onboarding"
 import { runner } from "./prepare"
 
@@ -66,6 +67,8 @@ export interface ProjectMessageDeps {
   ready: (ctx: ProjectContext, options?: { warm?: boolean }) => Promise<ProjectInitResult>
   /** Route one session to a directory inside a project (session override + project route). */
   routeSession?: (projectId: string, sessionId: string, directory: string, generation: number) => void
+  /** Hosted execution-location service; Cloud selections validate against it. */
+  cloud?: Pick<CloudService, "binding" | "hold">
   git?: GitOps
   log: (...args: unknown[]) => void
 }
@@ -147,6 +150,7 @@ async function activateSelection(requested: SidebarTarget, deps: ProjectMessageD
     deps.error("The project is unavailable. Check that the repository still exists.")
     return
   }
+  if (requested.kind === "cloud") return activateCloud(requested, deps)
   // Record the token only for an actionable target, so a click on an
   // unavailable project cannot discard a pending valid selection.
   const token = Symbol()
@@ -175,6 +179,33 @@ async function activateSelection(requested: SidebarTarget, deps: ProjectMessageD
     return finish({ projectId: target.projectId, kind: "local" }, deps)
   }
   finish(target, deps)
+}
+
+/**
+ * Hosted selections validate against the Cloud catalog binding and never
+ * touch local worktree readiness or the worktree warm pool.
+ */
+async function activateCloud(
+  requested: Extract<SidebarTarget, { kind: "cloud" }>,
+  deps: ProjectMessageDeps,
+): Promise<void> {
+  const ctx = deps.contexts.resolve(requested.projectId)
+  if (!ctx) return deps.error("The project is unavailable. Check that the repository still exists.")
+  const token = Symbol()
+  selections.set(deps, token)
+  await deps.ready(ctx, { warm: false })
+  if (selections.get(deps) !== token) return
+  const ref = {
+    projectId: requested.projectId,
+    providerID: requested.providerID,
+    workspaceID: requested.workspaceID,
+    organizationID: requested.organizationID,
+    sessionID: requested.sessionId,
+  }
+  // Fail closed: the compound binding must still exist in the catalog.
+  if (!deps.cloud?.binding(ref)) return deps.error("Cloud session is unavailable or was removed.")
+  deps.cloud.hold(ref)
+  finish(requested, deps)
 }
 
 /**
@@ -214,7 +245,9 @@ function finish(target: SidebarTarget, deps: ProjectMessageDeps): void {
     deps.error("The project is unavailable. Check that the repository still exists.")
     return
   }
-  activated.peekState()?.setActiveTarget(target)
+  // A hosted target is transient routing state: never persisted, so a restore
+  // cannot replay it before the Cloud catalog is available.
+  if (target.kind !== "cloud") activated.peekState()?.setActiveTarget(target)
   if (previous !== activated.id) deps.activate(activated)
   deps.push()
   deps.selected(target)
@@ -222,7 +255,7 @@ function finish(target: SidebarTarget, deps: ProjectMessageDeps): void {
 
 /** Persist the webview's current selection without activating or validating anything. */
 function rememberTarget(projectId: string, target: SidebarTarget, deps: ProjectMessageDeps): void {
-  if (target.projectId !== projectId) return
+  if (target.projectId !== projectId || target.kind === "cloud") return
   const state = deps.contexts.get(projectId)?.peekState()
   if (!state) return
   // Never persist a target the project does not have: the webview can race a

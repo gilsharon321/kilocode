@@ -8,6 +8,7 @@
  */
 
 import type { SnapshotFileDiff } from "@kilocode/sdk/v2/client"
+import type { CloudRefreshMessage, CloudStateMessage } from "../../webview-ui/src/types/messages/agent-manager"
 import type { DiffImage } from "../diff/types"
 import type { BrowserElement } from "../services/browser-automation"
 import type { Worktree, ManagedSession, Section } from "./WorktreeStateManager"
@@ -546,6 +547,7 @@ export type AgentManagerOutMessage =
   | SelectionActivatedMessage
   | ProjectParentMessage
   | ProjectSessionsMessage
+  | CloudStateMessage
   | ErrorOutMessage
   | SessionAddedMessage
   | SessionForkedMessage
@@ -1295,6 +1297,7 @@ interface BrowserRequestIn {
 export type AgentManagerInMessage =
   | import("../shared/pr-comment-actions").PRCommentRequest
   | import("../../webview-ui/src/types/messages/agent-manager").BaseUpdateRequest
+  | CloudRefreshMessage
   | CreateWorktreeIn
   | RequestProjectsIn
   | AddProjectIn

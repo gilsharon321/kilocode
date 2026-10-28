@@ -11,6 +11,7 @@ import type {
   RunStatus,
   WorktreeGitStats,
 } from "../src/types/messages"
+import type { CloudScopeView, CloudSidebarTarget } from "./cloud-types"
 import type { LanguageContextValue } from "../src/context/language"
 import { useDialog } from "@kilocode/kilo-ui/context/dialog"
 import { useVSCode } from "../src/context/vscode"
@@ -67,6 +68,77 @@ interface Props {
   onShortcuts: () => void
   onHistory: (projectId: string) => void
   shortcutMap?: () => Map<string, number>
+  /** Cloud execution-location discovery per project id. */
+  cloud?: (projectId: string) => CloudScopeView | undefined
+  /** Session key currently focused in the hosted chat area. */
+  cloudFocusKey?: string
+  onSelectCloud?: (target: CloudSidebarTarget) => void
+  onCloudRetry?: (projectId: string) => void
+}
+
+/** Searchable sessions for one project, placed in their local/worktree context. */
+function sessionItems(
+  project: AgentProjectSnapshot,
+  state: AgentManagerStateMessage,
+  sessions: ProjectSessionInfo[],
+  t: LanguageContextValue["t"],
+  activity: (id: string) => Activity,
+): SidebarSearchItem[] {
+  return sessions.map((session) => {
+    const wt = state.worktrees.find((item) => item.id === session.worktreeId)
+    const where = place(state, session, t("agentManager.local"))
+    return {
+      key: `${project.id}:session:${session.id}`,
+      projectId: project.id,
+      kind: "session" as const,
+      group: "sessions" as const,
+      title: session.title || t("agentManager.session.untitled"),
+      meta: [project.label, where],
+      search: [project.label, where, wt?.branch, session.title, session.id].filter(Boolean).join(" "),
+      updatedAt: session.updatedAt,
+      state: activity(session.id),
+      visible: project.expanded,
+      sessionId: session.id,
+      location: session.worktreeId ? ("worktree" as const) : ("local" as const),
+      worktreeId: session.worktreeId ?? undefined,
+    }
+  })
+}
+
+function cloudItems(
+  project: AgentProjectSnapshot,
+  scope: CloudScopeView | undefined,
+  t: LanguageContextValue["t"],
+): SidebarSearchItem[] {
+  const items: SidebarSearchItem[] = []
+  for (const workspace of scope?.workspaces ?? []) {
+    const where = workspace.name ?? t("agentManager.cloud.workspace")
+    for (const session of workspace.sessions) {
+      // Conflicted rows are not addressable, so they are not searchable.
+      if (session.conflict) continue
+      items.push({
+        key: `${project.id}:cloud:${session.key}`,
+        projectId: project.id,
+        kind: "cloud",
+        group: "sessions",
+        title: session.title || t("agentManager.session.untitled"),
+        meta: [project.label, where],
+        search: [project.label, where, workspace.branch, session.title, session.sessionID].filter(Boolean).join(" "),
+        updatedAt: session.updatedAt,
+        state: workspace.status?.hasActiveTurn ? "busy" : "idle",
+        visible: project.expanded,
+        target: {
+          projectId: project.id,
+          kind: "cloud",
+          providerID: session.providerID,
+          workspaceID: session.workspaceID,
+          organizationID: session.organizationID,
+          sessionId: session.sessionID,
+        },
+      })
+    }
+  }
+  return items
 }
 
 export const ProjectList: Component<Props> = (props) => {
@@ -151,25 +223,8 @@ export const ProjectList: Component<Props> = (props) => {
           busy: props.busy(project.id, worktree.id) || operationBusy(store, worktree.id),
         })
       }
-      for (const session of props.sessions[project.id] ?? []) {
-        const wt = state.worktrees.find((item) => item.id === session.worktreeId)
-        const where = place(state, session, props.t("agentManager.local"))
-        items.push({
-          key: `${project.id}:session:${session.id}`,
-          projectId: project.id,
-          kind: "session",
-          group: "sessions",
-          title: session.title || props.t("agentManager.session.untitled"),
-          meta: [project.label, where],
-          search: [project.label, where, wt?.branch, session.title, session.id].filter(Boolean).join(" "),
-          updatedAt: session.updatedAt,
-          state: props.sessionActivity(session.id),
-          visible: project.expanded,
-          sessionId: session.id,
-          location: session.worktreeId ? "worktree" : "local",
-          worktreeId: session.worktreeId ?? undefined,
-        })
-      }
+      items.push(...sessionItems(project, state, props.sessions[project.id] ?? [], props.t, props.sessionActivity))
+      items.push(...cloudItems(project, props.cloud?.(project.id), props.t))
     }
     return items
   })
@@ -180,6 +235,14 @@ export const ProjectList: Component<Props> = (props) => {
       (item) => item.projectId === projectId && item.kind === "worktree" && item.worktreeId === props.selection,
     )
     if (worktree) return worktree
+    // A focused Cloud row owns the chat area, so it is the current item.
+    const hosted = props.cloudFocusKey
+    if (hosted) {
+      const match = search().find(
+        (item) => item.projectId === projectId && item.kind === "cloud" && item.key === `${projectId}:cloud:${hosted}`,
+      )
+      if (match) return match
+    }
     // On LOCAL, an open session tab is the active item when there is one, so the
     // menu highlights the same row the sidebar does.
     const session = props.currentSessionID?.()
@@ -197,6 +260,7 @@ export const ProjectList: Component<Props> = (props) => {
     if (item.kind === "local") return select({ projectId: item.projectId, kind: "local" })
     if (item.kind === "worktree")
       return select({ projectId: item.projectId, kind: "worktree", worktreeId: item.worktreeId })
+    if (item.kind === "cloud") return props.onSelectCloud?.(item.target)
     return select({ projectId: item.projectId, kind: "session", sessionId: item.sessionId })
   }
   const newWorktree = (projectId: string) => {
@@ -328,6 +392,10 @@ export const ProjectList: Component<Props> = (props) => {
           onSelectWorktree={(projectId, worktreeId) => select({ projectId, kind: "worktree", worktreeId })}
           onOpenComments={props.onOpenComments}
           onOpenPR={props.onOpenPR}
+          onSelectCloud={(target) => props.onSelectCloud?.(target)}
+          onCloudRetry={() => props.onCloudRetry?.(project.id)}
+          cloud={() => props.cloud?.(project.id)}
+          cloudFocusKey={props.cloudFocusKey}
           onCreateSection={(worktreeIds) => newSection(project.id, worktreeIds)}
           renamingSection={renamingSection}
           onRenameEnd={() => setRenamingSection(undefined)}

@@ -473,6 +473,8 @@ export class WorktreeStateManager {
   }
 
   setActiveTarget(target: SidebarTarget | undefined): void {
+    // Hosted Cloud targets are transient; persisting one would restore a stale attachment.
+    if (target?.kind === "cloud") return
     const cur = this.activeTarget
     const same =
       cur?.kind === target?.kind &&

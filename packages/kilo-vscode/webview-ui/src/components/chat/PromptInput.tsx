@@ -174,6 +174,8 @@ interface PromptInputProps {
   worktree?: boolean
   onUpdateBase?: () => void
   boxId?: string
+  /** When false, keep a static placeholder instead of a changing shortcut tip. */
+  hints?: boolean
   terminalContext?: () => string | undefined
   worktrees?: () => WorktreeReference[]
   pendingSessionID?: string
@@ -408,7 +410,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     window.removeEventListener("blur", onWindowBlur)
   })
   const hint = () => {
-    if (settings().showShortcutHints === false || readonly() || props.blocked?.()) return undefined
+    if (props.hints === false || settings().showShortcutHints === false || readonly() || props.blocked?.()) return undefined
     return recommend({
       bindings: shortcuts().bindings,
       focused: focused(),
@@ -681,6 +683,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
     }),
   )
+
+  // Keep a typed draft when the chat unmounts (e.g. switching execution
+  // location) instead of relying on a key-change effect that never runs.
+  onCleanup(() => {
+    const value = untrack(text)
+    if (value) saveDraft(untrack(draftKey), value, untrack(reviewComments), untrack(imageAttach.images))
+  })
 
   // Seed prompt history from the current session's user messages (e.g., when a
   // session is loaded that has existing conversation). Tracks userMessages()

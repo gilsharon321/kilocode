@@ -1,3 +1,4 @@
+import type { CloudStateMessage } from "./agent-manager"
 import type { ProviderAuthAuthorization, ProviderAuthMethod, ProviderFailure } from "@kilocode/sdk/v2/client"
 import type { DiffSourceCapabilities, DiffSourceDescriptor } from "../../../../src/diff/sources/types"
 import type { PRComment, PRReactionContent } from "../../../agent-manager/pr/pr-types"
@@ -1920,6 +1921,7 @@ export type ExtensionMessage =
   | AgentManagerSelectionActivatedMessage
   | AgentManagerRevealSessionMessage
   | AgentManagerProjectSessionsMessage
+  | CloudStateMessage
   | AgentManagerRunStatusMessage
   | AgentManagerCaffeinationMessage
   | AgentManagerKeybindingsMessage

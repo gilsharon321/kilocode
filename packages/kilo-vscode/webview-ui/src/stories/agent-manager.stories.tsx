@@ -23,6 +23,7 @@ import { SidebarSearchMenu } from "../../agent-manager/SidebarSearchMenu"
 import { SidebarToggleButton } from "../../agent-manager/SidebarToggleButton"
 import { SideTerminalPanel, createTerminalState } from "../../agent-manager/terminal"
 import { LOCAL } from "../../agent-manager/navigate"
+import type { CloudScopeView, CloudSessionView, CloudWorkspaceView } from "../../agent-manager/cloud-types"
 import type { SidebarSearchItem } from "../../agent-manager/sidebar-search"
 import { Button } from "@kilocode/kilo-ui/button"
 import { IconButton } from "@kilocode/kilo-ui/icon-button"
@@ -1902,7 +1903,7 @@ const storyLocal = (branch: string, additions: number, deletions: number, ahead 
   behind,
 })
 
-const renderProjectSidebar = (width: number) => (
+const renderProjectSidebar = (width: number, cloud: Record<string, CloudScopeView> = {}, focusKey?: string) => (
   <StoryProviders noPadding>
     <div class="am-sidebar" style={{ width: `${width}px`, height: "720px", "box-sizing": "border-box" }}>
       <ProjectList
@@ -1983,10 +1984,139 @@ const renderProjectSidebar = (width: number) => (
         onSearchRef={() => {}}
         onShortcuts={() => {}}
         onHistory={() => {}}
+        cloud={(projectId) => cloud[projectId]}
+        cloudFocusKey={focusKey}
       />
     </div>
   </StoryProviders>
 )
+
+const cloudSession = (
+  workspaceID: string,
+  id: string,
+  title: string,
+  extra: Partial<CloudSessionView> = {},
+): CloudSessionView => ({
+  projectId: projectA.id,
+  providerID: "cloud",
+  workspaceID,
+  sessionID: id,
+  key: JSON.stringify(["cloud", workspaceID, id]),
+  title,
+  createdAt: "2026-07-20T10:00:00Z",
+  updatedAt: "2026-07-24T08:00:00Z",
+  ...extra,
+})
+
+const cloudWorkspace = (
+  id: string,
+  name: string,
+  sessions: CloudSessionView[],
+  extra: Partial<CloudWorkspaceView> = {},
+): CloudWorkspaceView => ({
+  providerID: "cloud",
+  workspaceID: id,
+  key: JSON.stringify(["cloud", id]),
+  name,
+  sessions,
+  ...extra,
+})
+
+const cloudReady = (workspaces: CloudWorkspaceView[], extra: Partial<CloudScopeView> = {}): CloudScopeView => ({
+  projectId: projectA.id,
+  status: "ready",
+  empty: false,
+  workspaces,
+  ...extra,
+})
+
+const cloudPopulated = cloudReady([
+  cloudWorkspace(
+    "ws-1",
+    "Refactor session routing",
+    [
+      cloudSession("ws-1", "ses-c1", "Investigate flaky reconnect"),
+      cloudSession(
+        "ws-1",
+        "ses-c2",
+        "A very long session title that should truncate instead of breaking the sidebar layout",
+      ),
+    ],
+    {
+      branch: "feature/session-routing",
+      status: { compute: "sleeping", billingBlocked: false, activeSessions: 0, hasActiveTurn: false, deleting: false },
+    },
+  ),
+  cloudWorkspace(
+    "ws-2",
+    "Same repository, other branch",
+    [cloudSession("ws-2", "ses-c3", "Investigate flaky reconnect")],
+    {
+      branch: "fix/gateway",
+      status: {
+        compute: "active",
+        billingBlocked: false,
+        activeSessions: 1,
+        hasActiveTurn: true,
+        deleting: false,
+        rateMicrodollarsPerHour: 250000,
+      },
+    },
+  ),
+])
+
+export const CloudSidebar: Story = {
+  name: "Project List — Cloud location with workspaces and sessions",
+  render: () =>
+    renderProjectSidebar(280, { [projectA.id]: cloudPopulated }, JSON.stringify(["cloud", "ws-1", "ses-c1"])),
+}
+
+export const CloudSidebar200: Story = {
+  name: "Project List - Cloud location at minimum sidebar width",
+  parameters: { layout: "fullscreen" },
+  render: () =>
+    renderProjectSidebar(200, { [projectA.id]: cloudPopulated }, JSON.stringify(["cloud", "ws-1", "ses-c1"])),
+}
+
+export const CloudSidebarLoading: Story = {
+  name: "Project List — Cloud location loading",
+  render: () => renderProjectSidebar(280, { [projectA.id]: cloudReady([], { status: "loading" }) }),
+}
+
+export const CloudSidebarSignedOut: Story = {
+  name: "Project List — Cloud location signed out",
+  render: () => renderProjectSidebar(280, { [projectA.id]: cloudReady([], { status: "signed_out" }) }),
+}
+
+export const CloudSidebarEmpty: Story = {
+  name: "Project List — Cloud location empty",
+  render: () => renderProjectSidebar(280, { [projectA.id]: cloudReady([], { empty: true }) }),
+}
+
+export const CloudSidebarError: Story = {
+  name: "Project List — Cloud location error",
+  render: () =>
+    renderProjectSidebar(280, {
+      [projectA.id]: cloudReady([], { status: "error", message: "The Cloud service is temporarily unavailable." }),
+    }),
+}
+
+export const CloudSidebarDegraded200: Story = {
+  name: "Project List - Cloud degraded with unavailable sessions at minimum width",
+  parameters: { layout: "fullscreen" },
+  render: () =>
+    renderProjectSidebar(200, {
+      [projectA.id]: cloudReady(
+        [
+          cloudWorkspace("ws-1", "Duplicate session IDs", [
+            cloudSession("ws-1", "dup", "Same ID in two workspaces", { conflict: true }),
+            cloudSession("ws-1", "ok", "Healthy session"),
+          ]),
+        ],
+        { degraded: true, conflictCount: 1 },
+      ),
+    }),
+}
 
 export const MultiProjectSidebar: Story = {
   name: "Project List — two expanded projects with restored controls",

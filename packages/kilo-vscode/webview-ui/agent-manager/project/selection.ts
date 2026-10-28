@@ -2,6 +2,7 @@ import { createEffect } from "solid-js"
 import type { ExtensionMessage, ManagedSessionState } from "../../src/types/messages"
 import { LOCAL } from "../navigate"
 import { rememberTarget } from "./restore"
+import type { CloudSidebarTarget } from "../cloud-types"
 
 export function applyProjectSelection(
   msg: ExtensionMessage,
@@ -13,6 +14,7 @@ export function applyProjectSelection(
     worktree: (projectId: string, worktreeId: string) => void
     focusLocal: (sessionId: string) => void
     managedSession: (worktreeId: string, sessionId: string) => void
+    cloud: (target: CloudSidebarTarget) => void
   },
 ): boolean {
   if (msg.type !== "agentManager.selectionActivated") return false
@@ -27,6 +29,7 @@ export function applyProjectSelection(
   if (!deps.applied(target.projectId)) return true
   // Scope by project like the session branch: a selection ack must never act on
   // another project's data if it lands before that project's state push.
+  if (target.kind === "cloud") deps.cloud(target)
   if (target.kind === "local") deps.local(target.projectId)
   if (target.kind === "worktree") deps.worktree(target.projectId, target.worktreeId)
   if (target.kind === "session") {
@@ -52,11 +55,14 @@ export function createTargetRememberer(opts: {
   selection: () => string | null
   owns: (sel: string) => boolean
   sessionId: () => string | undefined
+  /** True while a hosted chat owns the view: the stale local selection must not be re-persisted. */
+  hosted?: () => boolean
   post: Parameters<typeof rememberTarget>[0]
 }): void {
   createEffect(() => {
     const pid = opts.pid()
     if (!pid) return
+    if (opts.hosted?.()) return
     // pid flips with the catalog push, before the new project's state is
     // applied. In that window selection() still belongs to the previous
     // project, so persisting it would poison this project's target.

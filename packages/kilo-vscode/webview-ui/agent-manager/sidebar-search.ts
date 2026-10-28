@@ -1,5 +1,6 @@
 import type { SectionState } from "../src/types/messages"
 import type { Activity } from "../src/utils/session-activity"
+import type { CloudSidebarTarget } from "./cloud-types"
 
 export type SidebarSearchState = Activity
 
@@ -34,4 +35,9 @@ export type SidebarSearchItem =
       sessionId: string
       location: "local" | "worktree"
       worktreeId?: string
+    })
+  | (SearchItem & {
+      kind: "cloud"
+      group: "sessions"
+      target: CloudSidebarTarget
     })

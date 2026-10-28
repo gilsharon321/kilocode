@@ -176,9 +176,11 @@ export class VscodeHost implements Host {
           snapshot()
           return null
         }
-        if (msg.type !== "agentManager.setIntroDismissed") return opts.onBeforeMessage(msg)
-        if (typeof msg.dismissed === "boolean") await this.context.globalState.update(INTRO_KEY, msg.dismissed)
-        return null
+        if (msg.type === "agentManager.setIntroDismissed") {
+          if (typeof msg.dismissed === "boolean") await this.context.globalState.update(INTRO_KEY, msg.dismissed)
+          return null
+        }
+        return opts.onBeforeMessage(msg)
       },
     })
     provider.setStreamVisibility(panel.active && panel.visible)

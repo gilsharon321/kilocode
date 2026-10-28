@@ -51,6 +51,8 @@ interface ChatViewProps {
   worktree?: boolean
   onUpdateBase?: () => void
   promptBoxId?: string
+  /** Disable the contextual shortcut tip (hosted chats keep a static placeholder). */
+  hints?: boolean
   terminalContext?: () => string | undefined
   worktrees?: () => WorktreeReference[]
   deferFocusToQuestion?: () => boolean
@@ -478,6 +480,7 @@ export const ChatView: Component<ChatViewProps> = (props) => {
                   worktree={props.worktree}
                   onUpdateBase={props.onUpdateBase}
                   boxId={props.promptBoxId}
+                  hints={props.hints}
                   terminalContext={props.terminalContext}
                   worktrees={props.worktrees}
                   deferFocusToQuestion={props.deferFocusToQuestion}

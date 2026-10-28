@@ -67,6 +67,7 @@ export interface SectionState {
 // PR status types — sub-types live in agent-manager/pr/pr-types.ts
 // ---------------------------------------------------------------------------
 
+import type { CloudScopeView } from "../../../agent-manager/cloud-types"
 import type {
   PRState,
   ReviewDecision,
@@ -226,3 +227,15 @@ export type ContinueInWorktreeStatus =
   | "forking"
   | "done"
   | "error"
+
+/** Extension → webview: per-project Cloud discovery state. */
+export interface CloudStateMessage {
+  type: "agentManager.cloudState"
+  scopes: CloudScopeView[]
+}
+
+/** Webview → extension: reconcile the Cloud catalog now. */
+export interface CloudRefreshMessage {
+  type: "agentManager.refreshCloud"
+  projectId?: string
+}

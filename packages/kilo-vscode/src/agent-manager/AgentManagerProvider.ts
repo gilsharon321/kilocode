@@ -102,6 +102,8 @@ import type { BrowserBroker } from "../services/browser-automation"
 import { createBrowserLifecycle } from "./browser-lifecycle"
 import { handleSessionLifecycle } from "./session-lifecycle"
 import { isRestrictedRoot } from "./home-workspace"
+import { createCloud, type CloudWiring } from "./cloud/wiring"
+import { hotWorktrees } from "./project/hot-worktrees"
 export class AgentManagerProvider implements Disposable {
   public static readonly viewType = "kilo-code.new.AgentManagerPanel"
   private panel: PanelContext | undefined
@@ -131,6 +133,7 @@ export class AgentManagerProvider implements Disposable {
   private activity: ReturnType<typeof createWorktreeActivity>
   private unsubFont: (() => void) | undefined
   private unsubProjects: (() => void) | undefined
+  private readonly cloudWiring: CloudWiring
   /** Scratch set returned when no active context exists; mutations are discarded. */
   private readonly staleScratch = new Set<string>()
   private readonly healthScheduler = new HealthScheduler<ProjectContext>(async (ctx) => {
@@ -271,24 +274,13 @@ export class AgentManagerProvider implements Disposable {
       state: () => this.state,
       root: () => this.getRoot(),
       activeId: () => this.contexts.active()?.id,
-      hot: () => {
-        const ids = new Set<string>()
-        const target = this.state?.getActiveTarget()
-        if (target?.kind === "worktree") ids.add(target.worktreeId)
-        if (target?.kind === "session") {
-          const id = this.state?.getSession(target.sessionId)?.worktreeId
-          if (id) ids.add(id)
-        }
-        for (const status of this.run.state().runStatuses) {
-          if (status.state === "running" || status.state === "stopping") ids.add(status.worktreeId)
-        }
-        for (const sid of this.busySessions) {
-          const owner = this.contexts.byLiveSession(sid)
-          const id = owner?.peekState()?.getSession(sid)?.worktreeId ?? this.state?.getSession(sid)?.worktreeId
-          if (id) ids.add(id)
-        }
-        return ids
-      },
+      hot: () =>
+        hotWorktrees({
+          state: this.state,
+          runs: this.run.state().runStatuses,
+          busy: this.busySessions,
+          owner: (sid) => this.contexts.byLiveSession(sid)?.peekState() ?? undefined,
+        }),
       isUnhealthy: (id) => this.context?.report?.entries.some((e) => e.id === id && broken(e.health)) === true,
       visible: () => this.panel?.visible ?? false,
       post: (msg) => this.postToWebview(msg),
@@ -335,6 +327,7 @@ export class AgentManagerProvider implements Disposable {
       lifecycle: (event) => this.onSessionLifecycle(event),
       log: (err) => this.log("Failed to load worktree activity:", err),
     })
+    this.cloudWiring = createCloud(connectionService, this.contexts, this.registry, this.projects, this)
   }
   /**
    * Keep each project's cached sidebar session list in sync with backend
@@ -422,10 +415,12 @@ export class AgentManagerProvider implements Disposable {
     for (const poller of [this.statsPoller, this.projectPollers]) poller.setVisible(ctx.visible)
     this.diffs.setVisible(ctx.visible).catch((err) => this.log("Failed to update diff visibility:", err))
     this.onVisibilityChange?.(ctx.visible)
+    this.cloudWiring.visible(ctx.visible)
     ctx.onDidChangeVisibility((visible) => {
       for (const poller of [this.statsPoller, this.projectPollers]) poller.setVisible(visible)
       this.diffs.setVisible(visible).catch((err) => this.log("Failed to update diff visibility:", err))
       this.visiblePresence.flush()
+      this.cloudWiring.visible(visible)
     })
 
     ctx.sessions.onFollowupAdopted((session, directory) => {
@@ -444,6 +439,7 @@ export class AgentManagerProvider implements Disposable {
       // have already replaced us via attachPanel.
       if (this.panel === ctx) {
         this.log("Panel disposed")
+        this.cloudWiring.service.detach() // detach, never abort
         const ids = [...this.panelSessions]
         if (this.activeSessionId) ids.push(this.activeSessionId)
         this.panelSessions.clear()
@@ -517,6 +513,8 @@ export class AgentManagerProvider implements Disposable {
 
   private async onMessage(msg: Record<string, unknown>): Promise<Record<string, unknown> | null> {
     if (this.prBridge.handleMessage(msg)) return null
+    // Hosted Cloud messages never reach local handlers.
+    if (await this.cloudWiring.service.intercept(msg)) return null
     if (msg.type === "requestFileSearch" && typeof msg.sessionID !== "string" && this.activeSessionId) {
       return { ...msg, sessionID: this.activeSessionId }
     }
@@ -1622,6 +1620,7 @@ export class AgentManagerProvider implements Disposable {
       })
     this.projectPollers.sync(this.contexts)
     this.projectPollers.replay()
+    this.cloudWiring.sync()
   }
 
   // Worktree file helpers
@@ -1887,6 +1886,7 @@ export class AgentManagerProvider implements Disposable {
     this.projectPollers.dispose()
     this.gitOps.dispose()
     this.prBridge.poller.stop()
+    this.cloudWiring.dispose()
     this.run.dispose()
     this.terminalManager.dispose()
     await this.terminalRouter.dispose()

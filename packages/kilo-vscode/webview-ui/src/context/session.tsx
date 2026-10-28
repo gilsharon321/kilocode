@@ -105,6 +105,7 @@ import { goalControl } from "../../../src/kilo-provider/command-completion"
 import { continuation } from "./session-continuation"
 import { clearIfOn, createCloudPrune } from "./session-cloud-prune"
 import { isSameSessionTree } from "./model-usage"
+import { createModelUsageExclusion } from "./model-usage-exclusion"
 import { createDraftAgentSeed, resolvePromptAgent, resolveScopeAgent } from "./session-agent"
 import { createModelSelector } from "./session-model-selector"
 import { createModelPreferences } from "./session-model-preferences"
@@ -380,11 +381,13 @@ export const SessionProvider: ParentComponent = (props) => {
     modelUsage: {},
   })
   const [modelUsageReady, setModelUsageReady] = createSignal(false)
+  const modelUsageExcluded = createModelUsageExclusion()
+  const setModelUsageExcluded = (id: string, enabled: boolean) =>
+    modelUsageExcluded.set(id, enabled, store.modelUsage[id]?.requestID)
   let modelUsageQueued = false
-
   function refreshModelUsage() {
     const sessionID = currentSessionID()
-    if (!sessionID || sessionID.startsWith("cloud:")) return
+    if (!sessionID || sessionID.startsWith("cloud:") || modelUsageExcluded.has(sessionID)) return
     const requestID = crypto.randomUUID()
     setStore("modelUsage", sessionID, { requestID, data: store.modelUsage[sessionID]?.data })
     vscode.postMessage({ type: "requestSessionModelUsage", sessionID, requestID })
@@ -853,10 +856,10 @@ export const SessionProvider: ParentComponent = (props) => {
 
   function handleModelUsageMessage(message: ExtensionMessage): boolean {
     if (message.type !== "sessionModelUsageLoaded") return false
+    if (modelUsageExcluded.discard(message.requestID) || modelUsageExcluded.has(message.sessionID)) return true
     const state = store.modelUsage[message.sessionID]
-    if (state?.requestID === message.requestID) {
+    if (state?.requestID === message.requestID)
       setStore("modelUsage", message.sessionID, { requestID: message.requestID, data: message.data })
-    }
     return true
   }
 
@@ -2987,6 +2990,7 @@ export const SessionProvider: ParentComponent = (props) => {
     costBreakdown,
     contextUsage,
     modelUsage,
+    setModelUsageExcluded,
     agents,
     allAgents,
     skills,

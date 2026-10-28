@@ -159,12 +159,12 @@ export const SidebarSearchMenu: Component<SidebarSearchMenuProps> = (props) => {
                       {stateLabel()}
                     </span>
                   </Show>
-                  <Show when={item.kind !== "session" && item.state === "idle" && !item.busy}>
+                  <Show when={item.kind !== "session" && item.kind !== "cloud" && item.state === "idle" && !item.busy}>
                     <span class="search-menu-status am-sidebar-search-count">
-                      {item.kind !== "session" ? item.count : ""}
+                      {item.kind !== "session" && item.kind !== "cloud" ? item.count : ""}
                     </span>
                   </Show>
-                  <Show when={item.kind === "session" && item.state === "idle"}>
+                  <Show when={(item.kind === "session" || item.kind === "cloud") && item.state === "idle"}>
                     <span class="search-menu-status">{formatRelativeDate(item.updatedAt)}</span>
                   </Show>
                 </span>

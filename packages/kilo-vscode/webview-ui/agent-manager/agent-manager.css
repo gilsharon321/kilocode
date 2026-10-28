@@ -6282,3 +6282,175 @@ body.vscode-high-contrast-light {
 .am-terminal-host [class~="xterm-viewport"] {
   background: transparent !important;
 }
+
+/* Cloud execution location (explicit row alongside Local/worktrees) */
+.am-cloud {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px 0 6px;
+}
+
+.am-cloud-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-base);
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.am-cloud-header:hover {
+  background: var(--surface-inset-base-hover);
+}
+
+.am-cloud-title {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.am-cloud-scope {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-weak);
+  font-size: var(--font-size-small);
+}
+
+.am-cloud-spin {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--border-weak-base);
+  border-top-color: var(--text-base);
+  border-radius: 50%;
+  animation: am-cloud-spin 0.8s linear infinite;
+}
+
+@keyframes am-cloud-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.am-cloud-workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-left: 10px;
+}
+
+.am-cloud-ws-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  min-width: 0;
+  padding: 4px 6px;
+  color: var(--text-weak);
+  font-size: var(--font-size-small);
+}
+
+.am-cloud-ws-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-base);
+}
+
+.am-cloud-ws-branch,
+.am-cloud-ws-status,
+.am-cloud-ws-rate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.am-cloud-session {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px 4px 10px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-base);
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.am-cloud-session:hover {
+  background: var(--surface-inset-base-hover);
+}
+
+.am-cloud-session-active {
+  background: var(--surface-interactive-base);
+  color: var(--text-on-interactive-base);
+}
+
+.am-cloud-session-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.am-cloud-session-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Cloud rows follow the same hover / jump-modifier shortcut reveal as Local. */
+.am-cloud-session .am-shortcut-badge {
+  display: none;
+  flex-shrink: 0;
+}
+
+.am-cloud-session:hover .am-shortcut-badge,
+.am-show-shortcuts .am-cloud-session:has(.am-shortcut-badge) .am-shortcut-badge {
+  display: inline;
+}
+
+.am-cloud-session-active .am-shortcut-badge {
+  color: color-mix(in srgb, var(--text-on-interactive-base) 60%, transparent);
+}
+
+.am-cloud-conflict {
+  flex-shrink: 0;
+  color: var(--text-weak);
+  font-size: var(--font-size-small);
+}
+
+.am-cloud-error,
+.am-cloud-note,
+.am-cloud-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 4px 10px;
+  color: var(--text-weak);
+  font-size: var(--font-size-small);
+}
+
+.am-cloud-error-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

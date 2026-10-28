@@ -1230,7 +1230,14 @@ export class KiloProvider implements vscode.WebviewViewProvider, TelemetryProper
   ): void {
     this.isWebviewReady = false
     this.webview = webview
-    if (!this.autoApproveBridge) this.onBeforeMessage = options?.onBeforeMessage ?? null
+    if (options?.onBeforeMessage) {
+      const before = this.onBeforeMessage
+      this.onBeforeMessage = async (msg) => {
+        const next = await options.onBeforeMessage!(msg)
+        if (next === null) return null
+        return before ? before(next) : next
+      }
+    }
     this.setupWebviewMessageHandler(webview)
     this.initializeConnection()
   }

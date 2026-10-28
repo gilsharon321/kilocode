@@ -39,6 +39,8 @@ import { rootSessions } from "./project/session-filter"
 import { createWorktreeCompletion } from "./worktree-completion"
 import { worktreeDropReference } from "./worktree-references"
 import { beginPromptMentionDrop, endPromptMentionDrop } from "../src/utils/prompt-mention-drop"
+import { CloudSection } from "./CloudSection"
+import type { CloudScopeView, CloudSidebarTarget } from "./cloud-types"
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent)
 
@@ -67,6 +69,12 @@ interface Props {
   renamingSection: () => string | undefined
   onRenameEnd: () => void
   shortcutMap?: () => Map<string, number>
+  /** Cloud execution-location discovery for this project. */
+  cloud?: () => CloudScopeView | undefined
+  /** Session key currently focused in the hosted chat area. */
+  cloudFocusKey?: string
+  onSelectCloud: (target: CloudSidebarTarget) => void
+  onCloudRetry: () => void
 }
 
 /** Permanent real sidebar body for one expanded project. */
@@ -400,6 +408,19 @@ export const ProjectSidebarBody: Component<Props> = (props) => {
           </div>
         </div>
       </button>
+
+      <div class="am-section">
+        <CloudSection
+          projectId={props.project.id}
+          scope={props.cloud?.()}
+          focusKey={props.cloudFocusKey}
+          shortcuts={props.shortcutMap}
+          onSelect={props.onSelectCloud}
+          onRetry={props.onCloudRetry}
+          onToggle={() => {}}
+          t={props.t}
+        />
+      </div>
 
       <div class="am-section">
         <div class="am-worktree-list">

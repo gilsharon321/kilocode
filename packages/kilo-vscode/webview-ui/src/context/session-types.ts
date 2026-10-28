@@ -122,6 +122,7 @@ export interface SessionContextValue {
   costBreakdown: Accessor<Array<{ label: string; cost: number }>>
   contextUsage: Accessor<ContextUsage | undefined>
   modelUsage: Accessor<SessionModelUsage | undefined>
+  setModelUsageExcluded: (sessionID: string, excluded: boolean) => void
 
   // Skills loaded from the CLI backend
   skills: Accessor<SkillInfo[]>

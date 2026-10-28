@@ -280,3 +280,126 @@ describe("activateSelection — cross-project selection", () => {
     expect(calls.error).toEqual([])
   })
 })
+
+describe("activateSelection — Cloud targets", () => {
+  const ref = { providerID: "cloud", workspaceID: "w1", sessionID: "ses-1" }
+
+  function cloudMsg(projectId: string, extra: Record<string, unknown> = {}): AgentManagerInMessage {
+    return {
+      type: "agentManager.activateSelection",
+      target: {
+        projectId,
+        kind: "cloud",
+        providerID: ref.providerID,
+        workspaceID: ref.workspaceID,
+        sessionId: ref.sessionID,
+        ...extra,
+      },
+    } as unknown as AgentManagerInMessage
+  }
+
+  function withCloud(setupResult: ReturnType<typeof setup>, known: (r: Record<string, unknown>) => boolean) {
+    const held: Array<Record<string, unknown>> = []
+    const seen: Array<Record<string, unknown>> = []
+    setupResult.deps.cloud = {
+      binding: (r) => {
+        seen.push(r as never)
+        return known(r as never) ? ({} as never) : undefined
+      },
+      hold: (r) => void held.push(r as never),
+    }
+    return { held, seen }
+  }
+
+  it("validates the full compound binding and activates the project without warming worktrees", async () => {
+    const result = setup()
+    const { held, seen } = withCloud(result, (r) => r.workspaceID === "w1" && r.sessionID === "ses-1")
+    await handleProjectMessage(cloudMsg(result.extra), result.deps)
+
+    expect(seen[0]).toEqual({
+      projectId: result.extra,
+      providerID: "cloud",
+      workspaceID: "w1",
+      organizationID: undefined,
+      sessionID: "ses-1",
+    })
+    expect(held).toHaveLength(1)
+    expect(result.contexts.active()?.id).toBe(result.extra)
+    expect(result.calls.selected).toEqual(["cloud"])
+    expect(result.calls.error).toEqual([])
+    // The Cloud path never asks for the worktree warm pool.
+    expect(result.calls.ready).toEqual([result.extra])
+  })
+
+  it("fails closed with an error when the session vanished from the catalog", async () => {
+    const result = setup()
+    const { held } = withCloud(result, () => false)
+    await handleProjectMessage(cloudMsg(result.extra), result.deps)
+
+    expect(held).toEqual([])
+    expect(result.calls.selected).toEqual([])
+    expect(result.calls.error).toHaveLength(1)
+  })
+
+  it("fails closed when no Cloud service is wired", async () => {
+    const result = setup()
+    await handleProjectMessage(cloudMsg(result.extra), result.deps)
+    expect(result.calls.selected).toEqual([])
+    expect(result.calls.error).toHaveLength(1)
+  })
+
+  it("rejects a binding that names another workspace", async () => {
+    const result = setup()
+    withCloud(result, (r) => r.workspaceID === "w2")
+    await handleProjectMessage(cloudMsg(result.extra), result.deps)
+    expect(result.calls.selected).toEqual([])
+    expect(result.calls.error).toHaveLength(1)
+  })
+
+  it("rejects an unknown project without consulting the catalog", async () => {
+    const result = setup()
+    const { seen } = withCloud(result, () => true)
+    await handleProjectMessage(cloudMsg("prj-missing"), result.deps)
+    expect(seen).toEqual([])
+    expect(result.calls.error).toHaveLength(1)
+  })
+})
+
+describe("Cloud targets are never persisted", () => {
+  const cloud = {
+    projectId: "",
+    kind: "cloud",
+    providerID: "cloud",
+    workspaceID: "w1",
+    sessionId: "ses-1",
+  }
+
+  it("does not write a hosted target into the project's persisted selection", async () => {
+    const persisted: { current?: unknown } = { current: { projectId: "", kind: "local" } }
+    const result = setup({ state: () => fakeState(persisted) })
+    result.deps.cloud = { binding: () => ({}) as never, hold: () => {} }
+    persisted.current = { projectId: result.extra, kind: "local" }
+    await handleProjectMessage(
+      { type: "agentManager.activateSelection", target: { ...cloud, projectId: result.extra } } as never,
+      result.deps,
+    )
+    expect(result.calls.selected).toEqual(["cloud"])
+    // The last real local target survives; a restore never replays a stale attachment.
+    expect(persisted.current).toEqual({ projectId: result.extra, kind: "local" })
+  })
+
+  it("ignores a remembered hosted target from the webview", async () => {
+    const persisted: { current?: unknown } = {}
+    const result = setup({ state: () => fakeState(persisted) })
+    result.contexts.expand(result.extra)!.stateManager()
+    await handleProjectMessage(
+      {
+        type: "agentManager.rememberTarget",
+        projectId: result.extra,
+        target: { ...cloud, projectId: result.extra },
+      } as never,
+      result.deps,
+    )
+    expect(persisted.current).toBeUndefined()
+  })
+})

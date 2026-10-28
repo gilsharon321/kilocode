@@ -80,6 +80,8 @@ import { createProjectLive } from "./project/live"
 import { createProjectSessionsLive } from "./project/sessions-live"
 import { worktreeSessionIds as worktreeMembership, worktreeSessions } from "./project/session-filter"
 import { applyProjectSelection, createTargetRememberer } from "./project/selection"
+import { createCloudState } from "./cloud-state"
+import type { CloudSidebarTarget } from "./cloud-types"
 import {
   createLocalSessions,
   backgroundCreated,
@@ -241,6 +243,20 @@ const AgentManagerContent: Component = () => {
   const managedSessions = () => registry.active().managedSessions()
   const [selection, setSelection] = createSignal<SidebarSelection>(LOCAL)
   const metrics = tracker(vscode)
+  // Cloud execution-location state: discovery pushes and the focused hosted row.
+  const cloud = createCloudState(vscode.onMessage)
+  /** A Cloud row owns the chat area until a local/worktree target is chosen. */
+  const cloudActive = () => {
+    const focus = cloud.focus()
+    // Focus alone owns the chat area: the native session id trails the
+    // selection by a tick, and flipping on it unmounts the chat mid-switch.
+    return focus !== undefined && focus.projectId === activeProjectId()
+  }
+  const selectCloud = (target: CloudSidebarTarget) => {
+    saveTabMemory()
+    comments.cancel()
+    vscode.postMessage({ type: "agentManager.activateSelection", target })
+  }
   const busyWorktrees = () => registry.active().busy()
   /** True while the ⌘/Ctrl jump modifier is held — reveals the ⌘1-9 badges on all sidebar items. */
   const [held, setHeld] = createSignal(false)
@@ -258,6 +274,8 @@ const AgentManagerContent: Component = () => {
   const activateSelection = (target: AgentManagerSidebarTarget, restore?: boolean) => {
     saveTabMemory()
     comments.cancel()
+    // Choosing any local/worktree target hands the view back from a hosted chat.
+    if (target.kind !== "cloud") cloud.clearFocus(target.projectId)
     vscode.postMessage({ type: "agentManager.activateSelection", target, restore })
   }
   const creation = usePendingCreate(activeProjectId, (projectId, worktreeId) =>
@@ -850,6 +868,9 @@ const AgentManagerContent: Component = () => {
   })
 
   const contextEmpty = createMemo(() => {
+    // The Cloud location owns the chat area even when the previous local
+    // selection has no sessions.
+    if (cloudActive()) return false
     const sel = selection()
     if (terms.current().length > 0) return false
     if (sel === LOCAL) return localSessionIDs().length === 0
@@ -954,7 +975,9 @@ const AgentManagerContent: Component = () => {
   )
   createEffect(() => vscode.postMessage({ type: "sessionActivity", state: sessionActivity() }))
   const projectShortcutMap = createMemo(() =>
-    buildShortcutMap(buildProjectNavEntries(projectList(), projectStates()).map((entry) => ({ id: entry.id }))),
+    buildShortcutMap(
+      buildProjectNavEntries(projectList(), projectStates(), cloud.scopes()).map((entry) => ({ id: entry.id })),
+    ),
   )
 
   const scrollIntoView = (el: HTMLElement) => el.scrollIntoView({ block: "nearest", behavior: "smooth" })
@@ -963,6 +986,8 @@ const AgentManagerContent: Component = () => {
     {
       projects: projectList,
       states: projectStates,
+      cloud: cloud.scopes,
+      cloudFocus: cloud.focus,
       activeProjectId,
       selection,
       currentSessionID: session.currentSessionID,
@@ -1044,11 +1069,13 @@ const AgentManagerContent: Component = () => {
 
   const focusExistingSession = (sid: string) => {
     if (localSessionIDs().includes(sid)) {
+      cloud.clearFocus()
       focusLocalSession(sid)
       return true
     }
     const item = managedSessions().find((entry) => entry.id === sid)
     if (!item?.worktreeId) return false
+    cloud.clearFocus()
     return focusManagedSession(item.worktreeId, sid)
   }
 
@@ -1145,6 +1172,8 @@ const AgentManagerContent: Component = () => {
     selection,
     owns: (sel) => worktrees().some((wt) => wt.id === sel),
     sessionId: () => (reviewActive() ? undefined : session.currentSessionID()),
+    // A hosted session is never a local target; persisting it would restore its ID into Local tabs.
+    hosted: cloudActive,
     post: vscode.postMessage,
   })
   onMount(() => {
@@ -1530,6 +1559,18 @@ const AgentManagerContent: Component = () => {
         worktree: (projectId, worktreeId) => selectWorktree(worktreeId),
         focusLocal: focusLocalSession,
         managedSession: focusManagedSession,
+        cloud: (target) => {
+          // Fail closed: the compound binding must still be in the catalog.
+          const row = cloud
+            .scopeFor()
+            .get(target.projectId)
+            ?.workspaces.find((ws) => ws.providerID === target.providerID && ws.workspaceID === target.workspaceID)
+            ?.sessions.find((item) => item.sessionID === target.sessionId && !item.conflict)
+          if (!row) return
+          session.setModelUsageExcluded(target.sessionId, true)
+          cloud.focusCloud({ projectId: target.projectId, key: row.key, target })
+          session.selectSession(target.sessionId)
+        },
       })
 
       if (reportFailure(msg, { toast: showToast, t, project: currentProjectId() }) === "stale") return
@@ -1562,6 +1603,8 @@ const AgentManagerContent: Component = () => {
     vscode.postMessage({ type: "agentManager.requestState" })
     // Same race for the project catalog pushed at panel attach
     vscode.postMessage({ type: "agentManager.requestProjects" })
+    // Replay the Cloud catalog: the first discovery push can land before mount.
+    vscode.postMessage({ type: "agentManager.refreshCloud" })
     // Open a pending "New Session" tab if there are no persisted local sessions
     if (localSessionIDs().length === 0) {
       addPendingTab()
@@ -2025,6 +2068,13 @@ const AgentManagerContent: Component = () => {
       closeReviewTab()
       return
     }
+    // Closing a hosted view only detaches it locally; remote work keeps running.
+    if (cloudActive()) {
+      cloud.clearFocus()
+      session.clearCurrentSession()
+      tabFocus.restore()
+      return
+    }
     const tabs = activeTabs()
     if (tabs.length === 0) {
       closeSelectedWorktree()
@@ -2144,6 +2194,10 @@ const AgentManagerContent: Component = () => {
           shortcutMap={projectShortcutMap}
           activityFor={activity.project}
           sessionActivity={session.activityFor}
+          cloud={(projectId) => cloud.scopeFor().get(projectId)}
+          cloudFocusKey={cloud.focus()?.key}
+          onSelectCloud={selectCloud}
+          onCloudRetry={(projectId) => vscode.postMessage({ type: "agentManager.refreshCloud", projectId })}
         />
       </div>
 
@@ -2301,30 +2355,49 @@ const AgentManagerContent: Component = () => {
                   </div>
                 </Show>
                 <div class="am-chat-wrapper" classList={{ "am-chat-wrapper-hidden": contextEmpty() }}>
-                  <ChatView
-                    projectId={currentProjectId()}
-                    worktrees={references}
-                    emptyState={intro.render}
-                    introduction={intro.visible()}
-                    onForkMessage={readOnly() ? undefined : handleForkSession}
-                    onForkSession={readOnly() ? undefined : handleForkSession}
-                    onSelectSession={focusExistingSession}
-                    isSessionOpen={(id) =>
-                      localSessionIDs().includes(id) || managedSessions().some((entry) => entry.id === id)
-                    }
-                    readonly={readOnly()}
-                    continueInWorktree={selection() === LOCAL}
-                    worktree={worktrees().some((wt) => wt.id === selection())}
-                    onUpdateBase={update}
-                    promptBoxId={`agent-manager:${selection() ?? "unassigned"}`}
-                    terminalContext={() => selection() ?? undefined}
-                    deferFocusToQuestion={hasQuestionOption}
-                    pendingSessionID={selection() === LOCAL ? activePendingId() : undefined}
-                    focusOnDraftChange={focusOnDraftChange}
-                    onFocusChange={focusCtl.prompt}
-                    resolveEmbeddedTerminal={resolveTerminal}
-                    manager={hints.manager}
-                  />
+                  <Show when={cloudActive()}>
+                    <ChatView
+                      projectId={currentProjectId()}
+                      emptyState={intro.render}
+                      introduction={false}
+                      onSelectSession={focusExistingSession}
+                      isSessionOpen={() => false}
+                      // Hosted capability boundary: no fork, worktree, base-update, terminal,
+                      // or local-context affordances reach a Cloud session.
+                      readonly={false}
+                      continueInWorktree={false}
+                      worktree={false}
+                      promptBoxId="agent-manager:cloud"
+                      hints={false}
+                      onFocusChange={focusCtl.prompt}
+                    />
+                  </Show>
+                  <Show when={!cloudActive()}>
+                    <ChatView
+                      projectId={currentProjectId()}
+                      worktrees={references}
+                      emptyState={intro.render}
+                      introduction={intro.visible()}
+                      onForkMessage={readOnly() ? undefined : handleForkSession}
+                      onForkSession={readOnly() ? undefined : handleForkSession}
+                      onSelectSession={focusExistingSession}
+                      isSessionOpen={(id) =>
+                        localSessionIDs().includes(id) || managedSessions().some((entry) => entry.id === id)
+                      }
+                      readonly={readOnly()}
+                      continueInWorktree={selection() === LOCAL}
+                      worktree={worktrees().some((wt) => wt.id === selection())}
+                      onUpdateBase={update}
+                      promptBoxId={`agent-manager:${selection() ?? "unassigned"}`}
+                      terminalContext={() => selection() ?? undefined}
+                      deferFocusToQuestion={hasQuestionOption}
+                      pendingSessionID={selection() === LOCAL ? activePendingId() : undefined}
+                      focusOnDraftChange={focusOnDraftChange}
+                      onFocusChange={focusCtl.prompt}
+                      resolveEmbeddedTerminal={resolveTerminal}
+                      manager={hints.manager}
+                    />
+                  </Show>
                   <Show when={readOnly()}>
                     <div class="am-readonly-banner">
                       <Icon name="branch" size="small" />

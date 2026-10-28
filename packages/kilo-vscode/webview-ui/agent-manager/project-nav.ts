@@ -4,6 +4,7 @@ import { createMemo, type Accessor } from "solid-js"
 import {
   buildProjectNavOrder,
   resolveProjectNav,
+  cloudNavId,
   localNavId,
   worktreeNavId,
   type NavEntry,
@@ -11,18 +12,21 @@ import {
   LOCAL,
 } from "./navigate"
 import type { AgentManagerStateMessage, AgentProjectSnapshot } from "../src/types/messages"
+import type { CloudFocus } from "./cloud-state"
+import type { CloudScopeView } from "./cloud-types"
 
 /**
  * Sidebar keyboard-nav controller for the Agent Manager.
  *
  * Handles previous/next (⌘⌥↑/↓) and numeric-shortcut (⌘1-9) navigation across
  * the sidebar. It builds one global visual order across every expanded project:
- * Local, pinned worktrees, ungrouped worktrees, then section members,
- * using stable project-qualified composite ids, and activates each target with
- * a single atomic `agentManager.activateSelection` dispatch.
+ * Local, pinned worktrees, ungrouped worktrees, section members, then Cloud
+ * root sessions, using stable project-qualified composite ids, and activates
+ * each target with a single atomic `agentManager.activateSelection` dispatch.
  *
- * Sessions are reachable through the history view, not the tree, so they are
- * not part of the nav order.
+ * Local sessions are reachable through the history view, not the tree, so they
+ * are not part of the nav order. Cloud root sessions are rendered rows and are
+ * included in workspace/session order.
  *
  * The pure order/resolution logic lives in {@link navigate.ts} so it stays
  * solid/DOM-free and unit-testable; this module owns the reactive wiring and
@@ -31,6 +35,10 @@ import type { AgentManagerStateMessage, AgentProjectSnapshot } from "../src/type
 export interface ProjectNavDeps {
   projects: Accessor<AgentProjectSnapshot[]>
   states: Accessor<Record<string, AgentManagerStateMessage>>
+  /** Cloud discovery per project; collapsed projects still contribute when expanded. */
+  cloud: Accessor<readonly CloudScopeView[]>
+  /** Focused Cloud row, when the chat area shows a hosted session. */
+  cloudFocus: Accessor<CloudFocus | undefined>
   activeProjectId: Accessor<string | undefined>
   selection: Accessor<typeof LOCAL | string | null>
   currentSessionID: Accessor<string | undefined>
@@ -45,7 +53,9 @@ export interface ProjectNav {
 export function buildProjectNavEntries(
   projects: AgentProjectSnapshot[],
   states: Record<string, AgentManagerStateMessage>,
+  scopes: readonly CloudScopeView[] = [],
 ): NavEntry[] {
+  const cloud = new Map(scopes.map((scope) => [scope.projectId, scope]))
   return buildProjectNavOrder(
     projects.map((p) => {
       const st = states[p.id]
@@ -63,6 +73,15 @@ export function buildProjectNavEntries(
         })),
         worktreeOrder: st.worktreeOrder,
         sections: (st.sections ?? []).map((s) => ({ id: s.id, collapsed: s.collapsed })),
+        cloud: (cloud.get(p.id)?.workspaces ?? []).map((workspace) => ({
+          providerID: workspace.providerID,
+          workspaceID: workspace.workspaceID,
+          organizationID: workspace.organizationID,
+          sessions: workspace.sessions.map((session) => ({
+            sessionID: session.sessionID,
+            conflict: session.conflict,
+          })),
+        })),
       }
     }),
   )
@@ -72,6 +91,8 @@ export function buildProjectNavEntries(
 export const navSelector = (target: NavTarget): string => {
   if (target.kind === "local") return `[data-sidebar-id="${target.projectId}:local"]`
   if (target.kind === "worktree") return `[data-sidebar-id="${target.projectId}:${target.worktreeId}"]`
+  if (target.kind === "cloud")
+    return `[data-sidebar-id="${cloudNavId(target.projectId, target.providerID, target.workspaceID, target.sessionId)}"]`
   return `[data-sidebar-id="${target.projectId}:sess:${target.sessionId}"]`
 }
 
@@ -88,11 +109,15 @@ export function createProjectNav(
   post: (target: NavTarget) => void,
   scroll: (el: HTMLElement) => void,
 ): ProjectNav {
-  const projectOrder = createMemo(() => buildProjectNavEntries(deps.projects(), deps.states()))
+  const projectOrder = createMemo(() => buildProjectNavEntries(deps.projects(), deps.states(), deps.cloud()))
 
   const currentId = createMemo((): string | undefined => {
     const pid = deps.activeProjectId()
     if (!pid) return undefined
+    const hosted = deps.cloudFocus()
+    if (hosted && hosted.projectId === pid) {
+      return cloudNavId(pid, hosted.target.providerID, hosted.target.workspaceID, hosted.target.sessionId)
+    }
     const sel = deps.selection()
     if (sel === LOCAL) return localNavId(pid)
     if (typeof sel === "string") return worktreeNavId(pid, sel)

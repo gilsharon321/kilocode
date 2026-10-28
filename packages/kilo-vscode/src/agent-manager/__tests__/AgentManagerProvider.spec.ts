@@ -105,6 +105,7 @@ function createHarness() {
     host: Host
     panel: { sessions: { registerSession: ReturnType<typeof vi.fn> } } | undefined
     prBridge: { handleMessage: ReturnType<typeof vi.fn> }
+    cloudWiring: { service: { intercept: ReturnType<typeof vi.fn> } }
     activeSessionId: string | undefined
     naming: { prompt: ReturnType<typeof vi.fn> }
     scripts: { intercept: ReturnType<typeof vi.fn>; snapshot: ReturnType<typeof vi.fn> }
@@ -129,6 +130,7 @@ function createHarness() {
     },
   }
   manager.prBridge = { handleMessage: vi.fn().mockReturnValue(false) }
+  manager.cloudWiring = { service: { intercept: vi.fn().mockResolvedValue(false) } }
   manager.activeSessionId = undefined
   manager.naming = { prompt: vi.fn() }
   manager.scripts = { intercept: vi.fn().mockReturnValue(false), snapshot: vi.fn() }
@@ -147,6 +149,22 @@ function createHarness() {
 }
 
 describe("AgentManagerProvider worktree creation", () => {
+  it("intercepts Cloud model usage before returning to KiloProvider dispatch", async () => {
+    const manager = createHarness()
+    manager.cloudWiring.service.intercept.mockResolvedValue(true)
+    const result = await manager.handleMessage({
+      type: "requestSessionModelUsage",
+      sessionID: "hosted-session",
+      requestID: "req-1",
+    })
+    expect(manager.cloudWiring.service.intercept).toHaveBeenCalledWith({
+      type: "requestSessionModelUsage",
+      sessionID: "hosted-session",
+      requestID: "req-1",
+    })
+    expect(result).toBeNull()
+  })
+
   it("registers the first worktree session with session provider", async () => {
     const manager = createHarness()
     const created = {

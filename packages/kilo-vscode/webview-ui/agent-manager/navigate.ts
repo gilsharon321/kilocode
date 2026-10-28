@@ -8,6 +8,7 @@
  */
 
 import { sortWorktrees } from "./section-helpers"
+import { cloudSessionKey, cloudWorkspaceKey } from "./cloud-types"
 
 /** Sentinel value for the local repo selection. */
 export const LOCAL = "local" as const
@@ -149,6 +150,27 @@ export type NavTarget =
   | { projectId: string; kind: "local" }
   | { projectId: string; kind: "worktree"; worktreeId: string }
   | { projectId: string; kind: "session"; sessionId: string }
+  | {
+      projectId: string
+      kind: "cloud"
+      providerID: string
+      workspaceID: string
+      organizationID?: string
+      sessionId: string
+    }
+
+export interface NavCloudSession {
+  sessionID: string
+  /** Conflicted rows are disabled in the sidebar and are never nav targets. */
+  conflict?: boolean
+}
+
+export interface NavCloudWorkspace {
+  providerID: string
+  workspaceID: string
+  organizationID?: string
+  sessions: NavCloudSession[]
+}
 
 export interface NavEntry {
   /** Stable project-qualified composite id. */
@@ -163,18 +185,24 @@ export interface ProjectNavInput {
   /** Persisted top-level order containing worktree and section IDs. */
   worktreeOrder?: string[]
   sections: { id: string; collapsed: boolean }[]
+  /** Cloud workspaces/sessions appended after the project's local locations. */
+  cloud?: NavCloudWorkspace[]
 }
 
 export const localNavId = (projectId: string) => `${projectId}:local`
 export const worktreeNavId = (projectId: string, worktreeId: string) => `${projectId}:wt:${worktreeId}`
+/** Must match the Cloud row's `data-sidebar-id`. */
+export const cloudNavId = (projectId: string, providerID: string, workspaceID: string, sessionID: string) =>
+  `${projectId}:cloud:${cloudWorkspaceKey(providerID, workspaceID)}:${cloudSessionKey(providerID, workspaceID, sessionID)}`
 
 /**
  * Build one global visual order across expanded projects.
  *
  * For each expanded project (in input order): Local, then pinned worktrees, then
- * ungrouped worktrees, then members of each non-collapsed section in top-level order. This matches
- * `buildTopLevelItems` and the project body. Collapsed projects contribute
- * nothing.
+ * ungrouped worktrees, then members of each non-collapsed section in top-level order,
+ * then the project's Cloud root sessions in workspace order. This matches
+ * `buildTopLevelItems`, the project body, and `CloudSection`. Collapsed projects
+ * contribute nothing; conflicted Cloud rows are disabled and skipped.
  */
 export function buildProjectNavOrder(projects: ProjectNavInput[]): NavEntry[] {
   const order: NavEntry[] = []
@@ -203,6 +231,22 @@ export function buildProjectNavOrder(projects: ProjectNavInput[]): NavEntry[] {
         if (w.sectionId === sec.id && !w.pinned) {
           order.push({ id: worktreeNavId(pid, w.id), target: { projectId: pid, kind: "worktree", worktreeId: w.id } })
         }
+      }
+    }
+    for (const workspace of p.cloud ?? []) {
+      for (const session of workspace.sessions) {
+        if (session.conflict) continue
+        order.push({
+          id: cloudNavId(pid, workspace.providerID, workspace.workspaceID, session.sessionID),
+          target: {
+            projectId: pid,
+            kind: "cloud",
+            providerID: workspace.providerID,
+            workspaceID: workspace.workspaceID,
+            organizationID: workspace.organizationID,
+            sessionId: session.sessionID,
+          },
+        })
       }
     }
   }

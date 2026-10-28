@@ -18,6 +18,14 @@ export type SidebarTarget =
   | { projectId: string; kind: "local" }
   | { projectId: string; kind: "worktree"; worktreeId: string }
   | { projectId: string; kind: "session"; sessionId: string }
+  | {
+      projectId: string
+      kind: "cloud"
+      providerID: string
+      workspaceID: string
+      organizationID?: string
+      sessionId: string
+    }
 
 export type ProjectRouteErrorCode = "project_unknown" | "project_stale"
 

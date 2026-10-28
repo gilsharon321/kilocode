@@ -1,3 +1,4 @@
+import type { CloudRefreshMessage } from "./agent-manager"
 import type { InstallMarketplaceItemOptions, MarketplaceItem } from "../marketplace"
 import type { FileAttachment } from "./parts"
 import type { MessageLoadMode } from "./sessions"
@@ -886,6 +887,14 @@ export type AgentManagerSidebarTarget =
   | { projectId: string; kind: "local" }
   | { projectId: string; kind: "worktree"; worktreeId: string }
   | { projectId: string; kind: "session"; sessionId: string }
+  | {
+      projectId: string
+      kind: "cloud"
+      providerID: string
+      workspaceID: string
+      organizationID?: string
+      sessionId: string
+    }
 
 export interface ActivateSelectionMessage {
   type: "agentManager.activateSelection"
@@ -1737,6 +1746,7 @@ export interface DismissAgentMigrationBannerMessage {
 }
 
 export type WebviewMessage =
+  | CloudRefreshMessage
   | import("./agent-manager").BaseUpdateRequest
   | PRMergeRequest
   | { type: "sessionActivity"; state: Activity }

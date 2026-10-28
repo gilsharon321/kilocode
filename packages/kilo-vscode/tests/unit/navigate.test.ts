@@ -8,6 +8,7 @@ import {
   remoteSessions,
   buildProjectNavOrder,
   resolveProjectNav,
+  cloudNavId,
   localNavId,
   worktreeNavId,
   type ProjectNavInput,
@@ -467,6 +468,41 @@ describe("resolveProjectNav", () => {
     }
     expect(last).toBe(worktreeNavId("B", "bw1"))
   })
+
+  it("appends Cloud sessions after local locations and skips conflicted rows", () => {
+    const cloud = buildProjectNavOrder([
+      {
+        id: "A",
+        expanded: true,
+        worktrees: [{ id: "aw1" }],
+        sections: [],
+        cloud: [
+          {
+            providerID: "kilo",
+            workspaceID: "w1",
+            organizationID: "org",
+            sessions: [{ sessionID: "s1" }, { sessionID: "bad", conflict: true }],
+          },
+          { providerID: "kilo", workspaceID: "w2", sessions: [{ sessionID: "s2" }] },
+        ],
+      },
+    ])
+    expect(cloud.map((entry) => entry.id)).toEqual([
+      localNavId("A"),
+      worktreeNavId("A", "aw1"),
+      cloudNavId("A", "kilo", "w1", "s1"),
+      cloudNavId("A", "kilo", "w2", "s2"),
+    ])
+    expect(cloud.at(2)!.target).toEqual({
+      projectId: "A",
+      kind: "cloud",
+      providerID: "kilo",
+      workspaceID: "w1",
+      organizationID: "org",
+      sessionId: "s1",
+    })
+    expect(cloud.some((entry) => entry.id.includes("bad"))).toBe(false)
+  })
 })
 
 describe("createProjectNav", () => {
@@ -530,6 +566,8 @@ describe("createProjectNav", () => {
           {
             projects,
             states,
+            cloud: () => [],
+            cloudFocus: () => undefined,
             activeProjectId: () => activeProjectId,
             selection: () => selection,
             currentSessionID: () => currentSessionID,
@@ -612,6 +650,8 @@ describe("createProjectNav", () => {
         {
           projects: () => [project("A", true)],
           states,
+          cloud: () => [],
+          cloudFocus: () => undefined,
           activeProjectId: () => "A",
           selection: () => LOCAL,
           currentSessionID: () => undefined,

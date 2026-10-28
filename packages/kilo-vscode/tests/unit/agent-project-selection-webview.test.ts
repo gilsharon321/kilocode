@@ -16,9 +16,39 @@ function deps(active: string, applied = active) {
       worktree: (projectId: string, worktreeId: string) => calls.push(`worktree:${projectId}:${worktreeId}`),
       focusLocal: (sessionId: string) => calls.push(`focusLocal:${sessionId}`),
       managedSession: (worktreeId: string, sessionId: string) => calls.push(`managed:${worktreeId}:${sessionId}`),
+      cloud: (target: { projectId: string; workspaceID: string; sessionId: string }) =>
+        calls.push(`cloud:${target.projectId}:${target.workspaceID}:${target.sessionId}`),
     },
   }
 }
+
+describe("applyProjectSelection cloud targets", () => {
+  const target = {
+    projectId: "prj-a",
+    kind: "cloud",
+    providerID: "cloud",
+    workspaceID: "w1",
+    sessionId: "ses-1",
+  }
+
+  it("routes a Cloud acknowledgement to the cloud handler only, never local or worktree", () => {
+    const result = deps("prj-a")
+    expect(applyProjectSelection({ type: "agentManager.selectionActivated", target } as never, result.value)).toBe(true)
+    expect(result.calls).toEqual(["cloud:prj-a:w1:ses-1"])
+  })
+
+  it("ignores a delayed Cloud acknowledgement for another project", () => {
+    const result = deps("prj-b")
+    applyProjectSelection({ type: "agentManager.selectionActivated", target } as never, result.value)
+    expect(result.calls).toEqual([])
+  })
+
+  it("waits for the project's state before acting on a Cloud acknowledgement", () => {
+    const result = deps("prj-a", "prj-b")
+    applyProjectSelection({ type: "agentManager.selectionActivated", target } as never, result.value)
+    expect(result.calls).toEqual([])
+  })
+})
 
 describe("applyProjectSelection", () => {
   it("ignores delayed local and worktree acknowledgements from another project", () => {
